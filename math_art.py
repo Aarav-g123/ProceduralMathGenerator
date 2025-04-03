@@ -57,7 +57,7 @@ class BaseFractalFrame(tk.Frame):
         super().__init__(master)
         self.app = app
         self.size = 600
-        self.iterations = 100
+        self.iterations = 50
         self.xmin, self.xmax = -2.0, 1.0
         self.ymin, self.ymax = -1.5, 1.5
         
@@ -72,7 +72,7 @@ class BaseFractalFrame(tk.Frame):
         control_frame.pack(fill=tk.X)
         ttk.Button(control_frame, text="Reset", command=self.reset_view).pack(side=tk.LEFT, padx=5)
         ttk.Label(control_frame, text="Iterations:").pack(side=tk.LEFT)
-        self.iter_slider = ttk.Scale(control_frame, from_=50, to=500, 
+        self.iter_slider = ttk.Scale(control_frame, from_=10, to=200, 
                                    command=lambda v: self.set_iterations(int(float(v))))
         self.iter_slider.set(self.iterations)
         self.iter_slider.pack(side=tk.LEFT, padx=5)
@@ -91,37 +91,30 @@ class BaseFractalFrame(tk.Frame):
 
 class NewtonFrame(BaseFractalFrame):
     def draw_fractal(self):
-        img = Image.new('RGB', (self.size, self.size))
-        pixels = img.load()
+        x = np.linspace(-2, 2, self.size)
+        y = np.linspace(-2, 2, self.size)
+        X, Y = np.meshgrid(x, y)
+        Z = X + Y*1j
         
-        for x in range(self.size):
-            for y in range(self.size):
-                z = complex((x - self.size/2)/(self.size/4), (y - self.size/2)/(self.size/4))
-                for _ in range(self.iterations):
-                    try:
-                        z = z - (z**3 - 1)/(3*z**2)
-                    except:
-                        z = 0
-                        break
-                
-                if z != 0:
-                    root = (round(z.real,2), round(z.imag,2))
-                    colors = {(1.0,0.0):(255,0,0), (-0.5,0.87):(0,255,0), (-0.5,-0.87):(0,0,255)}
-                    color = colors.get(root, (100,100,100))
-                else:
-                    color = (0,0,0)
-                
-                pixels[x,y] = color
+        for _ in range(self.iterations):
+            mask = np.abs(Z) > 1e-6
+            Z[mask] -= (Z[mask]**3 - 1) / (3*Z[mask]**2)
         
-        self.tk_img = ImageTk.PhotoImage(img)
+        roots = [1, -0.5+0.866j, -0.5-0.866j]
+        colors = np.array([[255,0,0], [0,255,0], [0,0,255], [100,100,100]])
+        distances = np.abs(Z[:,:,None] - np.array(roots)[None,None,:])
+        closest = np.argmin(distances, axis=2)
+        img_array = colors[closest]
+        
+        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(img_array.astype(np.uint8)))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 class GameOfLifeFrame(BaseFractalFrame):
     def __init__(self, master, app):
         super().__init__(master, app)
-        self.grid_size = 100
+        self.grid_size = 100  # Fixed as integer
         self.cell_size = self.size // self.grid_size
-        self.grid = np.random.choice([0,1], (self.grid_size,self.grid_size))
+        self.grid = np.random.choice([0,1], (self.grid_size, self.grid_size))
         self.running = False
         self.iter_slider.pack_forget()
         
@@ -132,43 +125,33 @@ class GameOfLifeFrame(BaseFractalFrame):
         ttk.Button(control_frame, text="Reset", command=self.reset_life).pack(side=tk.LEFT, padx=5)
 
     def start_life(self):
-        self.running = True
-        self.update_life()
+        if not self.running:
+            self.running = True
+            self.update_life()
 
     def stop_life(self):
         self.running = False
 
     def reset_life(self):
-        self.grid = np.random.choice([0,1], (self.grid_size,self.grid_size))
+        self.grid = np.random.choice([0,1], (self.grid_size, self.grid_size))
         self.draw_fractal()
 
     def update_life(self):
         if self.running:
             self.draw_fractal()
-            self.after(100, self.update_life)
+            self.after(50, self.update_life)
 
     def draw_fractal(self):
-        new_grid = np.copy(self.grid)
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                neighbors = np.sum(self.grid[max(0,i-1):min(self.grid_size,i+2),
-                                      max(0,j-1):min(self.grid_size,j+2)]) - self.grid[i,j]
-                if self.grid[i,j] == 1 and (neighbors < 2 or neighbors > 3):
-                    new_grid[i,j] = 0
-                elif self.grid[i,j] == 0 and neighbors == 3:
-                    new_grid[i,j] = 1
-        self.grid = new_grid
+        kernel = np.array([[1,1,1], [1,0,1], [1,1,1]])
+        neighbors = convolve2d(self.grid, kernel, mode='same', boundary='wrap')
+        birth = (neighbors == 3) & (self.grid == 0)
+        survive = ((neighbors == 2) | (neighbors == 3)) & (self.grid == 1)
+        self.grid = np.where(birth | survive, 1, 0)
         
         img = Image.new('RGB', (self.size, self.size))
-        draw = ImageDraw.Draw(img)
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                if self.grid[i,j]:
-                    x = i * self.cell_size
-                    y = j * self.cell_size
-                    draw.rectangle([x,y,x+self.cell_size,y+self.cell_size], fill=(255,255,255))
-        
-        self.tk_img = ImageTk.PhotoImage(img)
+        img_array = np.repeat(self.grid[:,:,None], 3, axis=2) * 255
+        img.paste(Image.fromarray(img_array.astype(np.uint8)).resize((self.size, self.size), Image.NEAREST))
+        self.tk_img = ImageTk.PhotoImage(image=img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 class MandelbrotFrame(BaseFractalFrame):
@@ -177,19 +160,18 @@ class MandelbrotFrame(BaseFractalFrame):
         y = np.linspace(self.ymin, self.ymax, self.size)
         c = x[:,None] + 1j*y[None,:]
         z = np.zeros_like(c)
-        div_time = np.zeros(c.shape, int)
+        div_time = np.full(c.shape, self.iterations, dtype=np.float32)
         
         for i in range(self.iterations):
-            mask = (div_time == 0)
+            mask = (div_time == self.iterations)
             z[mask] = z[mask]**2 + c[mask]
-            div_time[(np.abs(z) >= 2) & (div_time == 0)] = i
+            div_time[(np.abs(z) > 2) & mask] = i
         
-        hue = (div_time.T * 255 // self.iterations).astype(np.uint8)
-        img = Image.fromarray(hue, 'L').convert('RGB')
-        self.tk_img = ImageTk.PhotoImage(img)
+        hue = (div_time.T * 255 / self.iterations).astype(np.uint8)
+        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(hue).convert('RGB'))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
-class JuliaFrame(BaseFractalFrame):
+class JuliaFrame(MandelbrotFrame):
     def __init__(self, master, app):
         self.c = complex(-0.4, 0.6)
         super().__init__(master, app)
@@ -198,124 +180,110 @@ class JuliaFrame(BaseFractalFrame):
         x = np.linspace(self.xmin, self.xmax, self.size)
         y = np.linspace(self.ymin, self.ymax, self.size)
         z = x[:,None] + 1j*y[None,:]
-        div_time = np.zeros(z.shape, int)
+        div_time = np.full(z.shape, self.iterations, dtype=np.float32)
         
         for i in range(self.iterations):
-            mask = (div_time == 0)
+            mask = (div_time == self.iterations)
             z[mask] = z[mask]**2 + self.c
-            div_time[(np.abs(z) >= 2) & (div_time == 0)] = i
+            div_time[(np.abs(z) > 2) & mask] = i
         
-        hue = (div_time.T * 255 // self.iterations).astype(np.uint8)
-        img = Image.fromarray(hue, 'L').convert('RGB')
-        self.tk_img = ImageTk.PhotoImage(img)
+        hue = (div_time.T * 255 / self.iterations).astype(np.uint8)
+        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(hue).convert('RGB'))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
-class BurningShipFrame(BaseFractalFrame):
+class BurningShipFrame(MandelbrotFrame):
     def draw_fractal(self):
         x = np.linspace(self.xmin, self.xmax, self.size)
         y = np.linspace(self.ymin, self.ymax, self.size)
         c = x[:,None] + 1j*y[None,:]
         z = np.zeros_like(c)
-        div_time = np.zeros(c.shape, int)
+        div_time = np.full(c.shape, self.iterations, dtype=np.float32)
         
         for i in range(self.iterations):
-            mask = (div_time == 0)
+            mask = (div_time == self.iterations)
             z[mask] = (np.abs(z[mask].real) + 1j*np.abs(z[mask].imag))**2 + c[mask]
-            div_time[(np.abs(z) >= 2) & (div_time == 0)] = i
+            div_time[(np.abs(z) > 2) & mask] = i
         
-        hue = (div_time.T * 255 // self.iterations).astype(np.uint8)
-        img = Image.fromarray(hue, 'L').convert('RGB')
-        self.tk_img = ImageTk.PhotoImage(img)
+        hue = (div_time.T * 255 / self.iterations).astype(np.uint8)
+        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(hue).convert('RGB'))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 class SierpinskiFrame(BaseFractalFrame):
     def draw_fractal(self):
+        depth = 8
+        points = np.array([[self.size//2, 10], [10, self.size-10], [self.size-10, self.size-10]])
         img = Image.new('RGB', (self.size, self.size), 'black')
         draw = ImageDraw.Draw(img)
         
-        def draw_triangle(points, depth=6):
-            if depth == 0:
-                draw.polygon(points, fill='white')
+        def divide(points, level):
+            if level <= 0:
+                draw.polygon(points.flatten().tolist(), fill='white')
                 return
-            
-            mid1 = ((points[0][0]+points[1][0])/2, (points[0][1]+points[1][1])/2)
-            mid2 = ((points[1][0]+points[2][0])/2, (points[1][1]+points[2][1])/2)
-            mid3 = ((points[2][0]+points[0][0])/2, (points[2][1]+points[0][1])/2)
-            
-            draw_triangle([points[0], mid1, mid3], depth-1)
-            draw_triangle([mid1, points[1], mid2], depth-1)
-            draw_triangle([mid3, mid2, points[2]], depth-1)
+            mids = (points + np.roll(points, 1, axis=0)) / 2
+            divide(np.array([points[0], mids[0], mids[2]]), level-1)
+            divide(np.array([mids[0], points[1], mids[1]]), level-1)
+            divide(np.array([mids[2], mids[1], points[2]]), level-1)
         
-        margin = 50
-        start_points = [
-            (self.size//2, margin),
-            (margin, self.size-margin),
-            (self.size-margin, self.size-margin)
-        ]
-        
-        draw_triangle(start_points)
-        self.tk_img = ImageTk.PhotoImage(img)
+        divide(points, depth)
+        self.tk_img = ImageTk.PhotoImage(image=img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 class BarnsleyFernFrame(BaseFractalFrame):
     def draw_fractal(self):
-        img = Image.new('RGB', (self.size, self.size))
-        draw = ImageDraw.Draw(img)
+        transforms = [
+            (0.85, 0.04, -0.04, 0.85, 0, 1.6),
+            (0.2, -0.26, 0.23, 0.22, 0, 1.6),
+            (-0.15, 0.28, 0.26, 0.24, 0, 0.44),
+            (0, 0, 0, 0.16, 0, 0)
+        ]
+        probs = [0.85, 0.07, 0.07, 0.01]
+        
         x, y = 0, 0
+        points = np.zeros((20000, 2))
+        for i in range(len(points)):
+            r = np.random.rand()
+            idx = np.searchsorted(np.cumsum(probs), r)
+            a,b,c,d,e,f = transforms[idx]
+            x, y = a*x + b*y + e, c*x + d*y + f
+            points[i] = [x, y]
         
-        for _ in range(100000):
-            r = random.random()
-            if r < 0.01:
-                x, y = 0, 0.16*y
-            elif r < 0.86:
-                x, y = 0.85*x + 0.04*y, -0.04*x + 0.85*y + 1.6
-            elif r < 0.93:
-                x, y = 0.2*x - 0.26*y, 0.23*x + 0.22*y + 1.6
-            else:
-                x, y = -0.15*x + 0.28*y, 0.26*x + 0.24*y + 0.44
-            
-            ix = int(self.size/2 + x * self.size/10)
-            iy = int(self.size - y * self.size/10)
-            if 0 <= ix < self.size and 0 <= iy < self.size:
-                draw.point((ix, iy), fill=(34, 139, 34))
-        
-        self.tk_img = ImageTk.PhotoImage(img)
+        points = (points * [self.size/11, -self.size/11] + [self.size/2, self.size]).astype(int)
+        valid = (points[:,0] >= 0) & (points[:,0] < self.size) & (points[:,1] >= 0) & (points[:,1] < self.size)
+        img = Image.new('RGB', (self.size, self.size))
+        pixels = img.load()
+        np.add.at(pixels, tuple(points[valid].T), (34, 139, 34))
+        self.tk_img = ImageTk.PhotoImage(image=img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 class KochSnowflakeFrame(BaseFractalFrame):
     def draw_fractal(self):
+        depth = 5
+        size = self.size * 0.8
+        offset = self.size * 0.1
+        points = np.array([[offset, size], [size, size], [size/2 + offset, size - size*math.sqrt(3)/2]])
         img = Image.new('RGB', (self.size, self.size), 'black')
         draw = ImageDraw.Draw(img)
         
-        def koch(p1, p2, depth=4):
-            if depth == 0:
-                draw.line([p1, p2], fill='white', width=2)
+        def koch(p1, p2, level):
+            if level == 0:
+                draw.line([tuple(p1), tuple(p2)], fill='white', width=2)
                 return
+            diff = p2 - p1
+            p3 = p1 + diff/3
+            p4 = p2 - diff/3
+            angle = np.arctan2(diff[1], diff[0]) + np.pi/3
+            length = np.hypot(diff[0], diff[1])/3
+            p5 = p3 + np.array([length*np.cos(angle), length*np.sin(angle)])
             
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            p3 = (p1[0] + dx/3, p1[1] + dy/3)
-            p4 = (p2[0] - dx/3, p2[1] - dy/3)
-            angle = math.atan2(dy, dx) + math.pi/3
-            length = math.hypot(dx, dy)/3
-            p5 = (p3[0] + length*math.cos(angle), p3[1] + length*math.sin(angle))
-            
-            koch(p1, p3, depth-1)
-            koch(p3, p5, depth-1)
-            koch(p5, p4, depth-1)
-            koch(p4, p2, depth-1)
+            koch(p1, p3, level-1)
+            koch(p3, p5, level-1)
+            koch(p5, p4, level-1)
+            koch(p4, p2, level-1)
         
-        size = self.size * 0.8
-        offset = self.size * 0.1
-        start_points = [
-            (offset, size),
-            (size, size),
-            (size/2 + offset, size - size*math.sqrt(3)/2)
-        ]
         for i in range(3):
-            koch(start_points[i], start_points[(i+1)%3])
+            koch(points[i], points[(i+1)%3], depth)
         
-        self.tk_img = ImageTk.PhotoImage(img)
+        self.tk_img = ImageTk.PhotoImage(image=img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
 if __name__ == "__main__":
