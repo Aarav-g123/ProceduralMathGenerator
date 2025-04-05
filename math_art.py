@@ -4,11 +4,12 @@ import tkinter as tk
 from tkinter import ttk
 import math
 import random
+from collections import deque
 
 class FractalApp:
     def __init__(self, master):
         self.master = master
-        self.master.title("Fractal Explorer")
+        self.master.title("Fractal Explorer 2.0")
         self.master.geometry("800x800")
         self.current_frame = None
         self.show_main_menu()
@@ -37,7 +38,7 @@ class MainMenu(tk.Frame):
         super().__init__(master)
         self.app = app
         
-        tk.Label(self, text="Fractal Explorer", font=("Arial", 24)).pack(pady=20)
+        tk.Label(self, text="Fractal Explorer 2.0", font=("Arial", 24)).pack(pady=20)
         
         categories = [
             ("Mandelbrot Family", MandelbrotCategory),
@@ -100,8 +101,15 @@ class SierpinskiCategory(BaseCategory):
 
 class IFSCategory(BaseCategory):
     def create_fractal_buttons(self):
-        tk.Button(self, text="Barnsley Fern", width=20, height=2,
-                command=lambda: self.app.show_fractal(BarnsleyFernFrame)).pack(pady=2)
+        fractals = [
+            ("Barnsley Fern", lambda: self.app.show_fractal(IFSFractalFrame, 'barnsley')),
+            ("Koch Curve", lambda: self.app.show_fractal(IFSFractalFrame, 'koch')),
+            ("Dragon Curve", lambda: self.app.show_fractal(IFSFractalFrame, 'dragon')),
+            ("Levy C Curve", lambda: self.app.show_fractal(IFSFractalFrame, 'levy')),
+            ("Fractal Tree", lambda: self.app.show_fractal(IFSFractalFrame, 'tree'))
+        ]
+        for text, command in fractals:
+            tk.Button(self, text=text, width=20, height=2, command=command).pack(pady=2)
 
 class BaseFractal(tk.Frame):
     def __init__(self, master, app):
@@ -217,64 +225,152 @@ class NewtonFrame(BaseFractal):
 
 class SierpinskiFrame(BaseFractal):
     def draw_fractal(self):
-        img = Image.new('RGB', (self.size, self.size), 'black')
-        draw = ImageDraw.Draw(img)
-        
-        def draw_triangle(points, depth):
-            if depth <= 0:
-                draw.polygon(points, fill='white')
-                return
-            
-            mid_points = [
-                ((points[0][0] + points[1][0])/2, (points[0][1] + points[1][1])/2),
-                ((points[1][0] + points[2][0])/2, (points[1][1] + points[2][1])/2),
-                ((points[2][0] + points[0][0])/2, (points[2][1] + points[0][1])/2)
-            ]
-            
-            draw_triangle([points[0], mid_points[0], mid_points[2]], depth-1)
-            draw_triangle([mid_points[0], points[1], mid_points[1]], depth-1)
-            draw_triangle([mid_points[2], mid_points[1], points[2]], depth-1)
-
+        self.img = Image.new('RGB', (self.size, self.size), 'black')
+        self.draw = ImageDraw.Draw(self.img)
+        self.queue = deque()
         margin = 50
         start_points = [
             (self.size//2, margin),
             (margin, self.size - margin),
             (self.size - margin, self.size - margin)
         ]
-        
-        draw_triangle(start_points, 6)
-        self.tk_img = ImageTk.PhotoImage(image=img)
-        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+        self.queue.append((start_points, 0))
+        self.max_depth = 6
+        self.animate_sierpinski()
 
-class BarnsleyFernFrame(BaseFractal):
-    def draw_fractal(self):
-        transforms = [
-            (0.85, 0.04, -0.04, 0.85, 0, 1.6, 0.85),
-            (0.2, -0.26, 0.23, 0.22, 0, 1.6, 0.07),
-            (-0.15, 0.28, 0.26, 0.24, 0, 0.44, 0.07),
-            (0, 0, 0, 0.16, 0, 0, 0.01)
-        ]
+    def animate_sierpinski(self):
+        if not self.queue:
+            self.tk_img = ImageTk.PhotoImage(image=self.img)
+            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+            return
         
-        x, y = 0, 0
-        points = np.zeros((20000, 2))
-        for i in range(len(points)):
-            r = random.random()
-            for a, b, c, d, e, f, prob in transforms:
-                if r < prob:
-                    x, y = a*x + b*y + e, c*x + d*y + f
-                    break
-            points[i] = [x, y]
+        next_queue = deque()
+        while self.queue:
+            points, depth = self.queue.popleft()
+            if depth >= self.max_depth:
+                self.draw.polygon(points, fill='white')
+            else:
+                mid_points = [
+                    ((points[0][0] + points[1][0])/2, (points[0][1] + points[1][1])/2),
+                    ((points[1][0] + points[2][0])/2, (points[1][1] + points[2][1])/2),
+                    ((points[2][0] + points[0][0])/2, (points[2][1] + points[0][1])/2)
+                ]
+                sub_triangles = [
+                    [points[0], mid_points[0], mid_points[2]],
+                    [mid_points[0], points[1], mid_points[1]],
+                    [mid_points[2], mid_points[1], points[2]]
+                ]
+                for triangle in sub_triangles:
+                    next_queue.append((triangle, depth + 1))
         
-        points = (points * [self.size/11, -self.size/11] + [self.size/2, self.size]).astype(int)
-        valid = (points[:,0] >= 0) & (points[:,0] < self.size) & (points[:,1] >= 0) & (points[:,1] < self.size)
-        
-        img = Image.new('RGB', (self.size, self.size))
-        pixels = img.load()
-        for x, y in points[valid]:
-            pixels[x, y] = (34, 139, 34)
-        
-        self.tk_img = ImageTk.PhotoImage(image=img)
+        self.queue = next_queue
+        self.tk_img = ImageTk.PhotoImage(image=self.img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+        self.after(100, self.animate_sierpinski)
+
+class IFSFractalFrame(BaseFractal):
+    def __init__(self, master, app, fractal_type):
+        self.fractal_type = fractal_type
+        super().__init__(master, app)
+
+    def draw_fractal(self):
+        transforms = []
+        self.color = (34, 139, 34)  # Default green
+        
+        if self.fractal_type == 'barnsley':
+            transforms = [
+                (0.85, 0.04, -0.04, 0.85, 0, 1.6, 0.85),
+                (0.2, -0.26, 0.23, 0.22, 0, 1.6, 0.07),
+                (-0.15, 0.28, 0.26, 0.24, 0, 0.44, 0.07),
+                (0, 0, 0, 0.16, 0, 0, 0.01)
+            ]
+        elif self.fractal_type == 'koch':
+            transforms = [
+                (0.3333, 0, 0, 0.3333, 0, 0, 0.25),
+                (0.1667, -0.2887, 0.2887, 0.1667, 0.3333, 0, 0.25),
+                (0.1667, 0.2887, -0.2887, 0.1667, 0.5, 0.2887, 0.25),
+                (0.3333, 0, 0, 0.3333, 0.6667, 0, 0.25)
+            ]
+            self.color = (255, 255, 255)
+        elif self.fractal_type == 'dragon':
+            transforms = [
+                (0.5, 0.5, -0.5, 0.5, 0, 0, 0.5),
+                (-0.5, -0.5, 0.5, -0.5, 1, 0, 0.5)
+            ]
+            self.color = (0, 0, 255)
+        elif self.fractal_type == 'levy':
+            transforms = [
+                (0.5, -0.5, 0.5, 0.5, 0, 0, 0.5),
+                (0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5)
+            ]
+            self.color = (255, 0, 0)
+        elif self.fractal_type == 'tree':
+            transforms = [
+                (0.195, -0.488, 0.344, 0.443, 0.4431, 0.2452, 0.4),
+                (0.462, 0.414, -0.252, 0.361, 0.2511, 0.5692, 0.4),
+                (-0.058, -0.07, 0.453, -0.111, 0.5976, 0.0969, 0.15),
+                (-0.035, 0.07, -0.469, -0.022, 0.488, 0.5069, 0.05)
+            ]
+        
+        # Set scaling and offsets
+        if self.fractal_type == 'barnsley':
+            scale_x = self.size / 11
+            scale_y = -self.size / 11
+            offset_x = self.size / 2
+            offset_y = self.size
+        elif self.fractal_type == 'tree':
+            scale_x = self.size / 2.5
+            scale_y = -self.size / 2.5
+            offset_x = self.size / 2
+            offset_y = self.size
+        else:
+            scale_x = self.size / 3
+            scale_y = self.size / 3
+            offset_x = self.size / 2
+            offset_y = self.size / 2
+
+        self.img = Image.new('RGB', (self.size, self.size))
+        self.pixels = self.img.load()
+        self.x, self.y = 0.0, 0.0
+        self.total_points = 20000
+        self.points_generated = 0
+        self.batch_size = 100
+        self.transforms = transforms
+        self.scale_x = scale_x
+        self.scale_y = scale_y
+        self.offset_x = offset_x
+        self.offset_y = offset_y
+        self.after(0, self.generate_batch)
+
+    def generate_batch(self):
+        if self.points_generated >= self.total_points:
+            self.tk_img = ImageTk.PhotoImage(image=self.img)
+            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+            return
+
+        for _ in range(self.batch_size):
+            if self.points_generated >= self.total_points:
+                break
+            r = random.random()
+            cumulative = 0.0
+            for a, b, c, d, e, f, prob in self.transforms:
+                cumulative += prob
+                if r < cumulative:
+                    x_new = a * self.x + b * self.y + e
+                    y_new = c * self.x + d * self.y + f
+                    self.x, self.y = x_new, y_new
+                    break
+
+            px = int(self.x * self.scale_x + self.offset_x)
+            py = int(self.y * self.scale_y + self.offset_y)
+            if 0 <= px < self.size and 0 <= py < self.size:
+                self.pixels[px, py] = self.color
+
+            self.points_generated += 1
+
+        self.tk_img = ImageTk.PhotoImage(image=self.img)
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+        self.after(10, self.generate_batch)
 
 if __name__ == "__main__":
     root = tk.Tk()
