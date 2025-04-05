@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 import math
 import random
+from scipy.signal import convolve2d
 
 class FractalApp:
     def __init__(self, master):
@@ -112,7 +113,7 @@ class NewtonFrame(BaseFractalFrame):
 class GameOfLifeFrame(BaseFractalFrame):
     def __init__(self, master, app):
         super().__init__(master, app)
-        self.grid_size = 100  # Fixed as integer
+        self.grid_size = 100
         self.cell_size = self.size // self.grid_size
         self.grid = np.random.choice([0,1], (self.grid_size, self.grid_size))
         self.running = False
@@ -210,21 +211,30 @@ class BurningShipFrame(MandelbrotFrame):
 
 class SierpinskiFrame(BaseFractalFrame):
     def draw_fractal(self):
-        depth = 8
-        points = np.array([[self.size//2, 10], [10, self.size-10], [self.size-10, self.size-10]])
         img = Image.new('RGB', (self.size, self.size), 'black')
         draw = ImageDraw.Draw(img)
         
-        def divide(points, level):
-            if level <= 0:
-                draw.polygon(points.flatten().tolist(), fill='white')
+        def draw_triangle(points, depth):
+            if depth == 0:
+                draw.polygon(points, fill='white')
                 return
-            mids = (points + np.roll(points, 1, axis=0)) / 2
-            divide(np.array([points[0], mids[0], mids[2]]), level-1)
-            divide(np.array([mids[0], points[1], mids[1]]), level-1)
-            divide(np.array([mids[2], mids[1], points[2]]), level-1)
+            
+            mid1 = (points[0][0] + points[1][0])/2, (points[0][1] + points[1][1])/2
+            mid2 = (points[1][0] + points[2][0])/2, (points[1][1] + points[2][1])/2
+            mid3 = (points[2][0] + points[0][0])/2, (points[2][1] + points[0][1])/2
+            
+            draw_triangle([points[0], mid1, mid3], depth-1)
+            draw_triangle([mid1, points[1], mid2], depth-1)
+            draw_triangle([mid3, mid2, points[2]], depth-1)
         
-        divide(points, depth)
+        margin = 50
+        start_points = [
+            (self.size//2, margin),
+            (margin, self.size - margin),
+            (self.size - margin, self.size - margin)
+        ]
+        
+        draw_triangle(start_points, 6)
         self.tk_img = ImageTk.PhotoImage(image=img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
 
