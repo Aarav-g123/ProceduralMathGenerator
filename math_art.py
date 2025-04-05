@@ -6,6 +6,9 @@ import math
 import random
 from collections import deque
 
+#Mandelbulb :)
+
+
 class FractalApp:
     def __init__(self, master):
         self.master = master
@@ -527,23 +530,39 @@ class IFSFractalFrame(BaseFractal):
             self.offset_y = self.size
 
         elif self.fractal_type == 'koch':
-            angle = math.pi/3
+            angle = math.pi / 3
+            scale = 1 / 3
+            sin60 = math.sin(angle)
+            
             self.transforms = [
-                (0.333,0,0,0.333,0,0,0.25),
-                (0.333*math.cos(angle),-0.333*math.sin(angle),
-                0.333*math.sin(angle),0.333*math.cos(angle),
-                0.333,0,0.25),
-                (0.333*math.cos(-angle),-0.333*math.sin(-angle),
-                0.333*math.sin(-angle),0.333*math.cos(-angle),
-                0.5,0.333*math.sin(angle),0.25),
-                (0.333,0,0,0.333,0.666,0,0.25)
+                (scale, 0, 0, scale, 0, 0, 0.25),
+                (
+                    scale * math.cos(angle),
+                    -scale * math.sin(angle),
+                    scale * math.sin(angle),
+                    scale * math.cos(angle),
+                    scale,
+                    0,
+                    0.25
+                ),
+                (
+                    scale * math.cos(-angle),
+                    -scale * math.sin(-angle),
+                    scale * math.sin(-angle),
+                    scale * math.cos(-angle),
+                    0.5,
+                    scale * sin60,
+                    0.25
+                ),
+                (scale, 0, 0, scale, 2 * scale, 0, 0.25)
             ]
-            self.color = (255,255,255)
+            
+            self.color = (255, 255, 255)
             self.scale_x = self.size
-            self.scale_y = self.size
-            self.offset_x = self.size*0.1
-            self.offset_y = self.size*0.5
-
+            self.scale_y = -self.size
+            self.offset_x = self.size * 0.1
+            self.offset_y = self.size * 0.7
+            self.points_generated = 0
         elif self.fractal_type == 'dragon':
             self.transforms = [
                 (0.5,0.5,-0.5,0.5,0,0,0.5),
