@@ -1,10 +1,11 @@
 import numpy as np
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import ttk
 import math
 import random
 from collections import deque
+from functools import partial
 
 #Mandelbulb :)
 
@@ -48,7 +49,8 @@ class MainMenu(tk.Frame):
             ("Julia Sets", JuliaCategory),
             ("Newton Fractals", NewtonCategory),
             ("Sierpinski's Gasket", SierpinskiCategory),
-            ("IFS Fractals", IFSCategory)
+            ("IFS Fractals", IFSCategory),
+            ("3D Fractals", ThreeDFractalsCategory)
         ]
         
         for text, category_class in categories:
@@ -104,6 +106,10 @@ class SierpinskiCategory(BaseCategory):
                  command=lambda: self.app.show_fractal(SierpinskiFrame)).pack(pady=2)
         tk.Button(self, text="Sierpinski Triangle (Chaos Game)", 
                  command=lambda: self.app.show_fractal(ChaosGameSierpinskiFrame)).pack(pady=2)
+class ThreeDFractalsCategory(BaseCategory):
+    def create_fractal_buttons(self):
+        tk.Button(self, text="Mandelbulb", width=20, height=2,
+                command=lambda: self.app.show_fractal(MandelbulbFrame)).pack(pady=2)
 
 class IFSCategory(BaseCategory):
     def create_fractal_buttons(self):
@@ -145,7 +151,10 @@ class BaseFractal(tk.Frame):
             self.canvas.unbind("<ButtonRelease-1>")
             self.master.unbind("<Control-z>")
             self.master.unbind("<Control-Z>")
-
+    def destroy(self):
+        if hasattr(self, 'anim_id'):
+            self.after_cancel(self.anim_id)
+        super().destroy()
     def setup_ui(self):
         tk.Button(self, text="← Back", command=self.app.show_main_menu).pack(anchor="nw")
         self.canvas = tk.Canvas(self, width=self.size, height=self.size, bg='black')
@@ -298,7 +307,204 @@ class ChaosGameSierpinskiFrame(BaseFractal):
         self.tk_img = ImageTk.PhotoImage(image=self.img)
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
         self.anim_id = self.after(self.animation_delay, self.animate)
+class MandelbulbFrame(BaseFractal):
+    def __init__(self, master, app):
+        # Initialize critical attributes first
+        self.power = 8
+        self.size = 300
+        self.iterations = 30
+        
+        # Call parent constructor
+        super().__init__(master, app)
+        
+        # Initialize remaining attributes
+        self.zoom_enabled = False
+        self.cam_pos = np.array([0, 0, -2.5])
+        self.light_pos = np.array([2, 1, -1])
+        self.rotation = 0.0
+        self.rendering = False
+        self.active = True
+        
+        # Clear existing UI from parent and rebuild
+        self.rebuild_ui()
 
+    def rebuild_ui(self):
+        """Destroy parent UI elements and create new ones"""
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        self.setup_ui()
+        self.create_3d_controls()
+
+    def setup_ui(self):
+        """Custom UI setup for Mandelbulb"""
+        tk.Button(self, text="← Back", command=self.app.show_main_menu).pack(anchor="nw")
+        self.canvas = tk.Canvas(self, width=self.size, height=self.size, bg='black')
+        self.canvas.pack()
+        self.initialize_fractal()
+
+    def create_3d_controls(self):
+        """Create Mandelbulb-specific controls"""
+        control_frame = ttk.Frame(self)
+        control_frame.pack(fill=tk.X)
+        
+        self.start_stop = ttk.Button(control_frame, text="Start", command=self.toggle_animation)
+        self.start_stop.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(control_frame, text="Reset", command=self.safe_reset).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(control_frame, text="Power:").pack(side=tk.LEFT)
+        self.power_slider = ttk.Scale(control_frame, from_=2, to=10, 
+                                    command=lambda v: self.set_power(int(float(v))))
+        self.power_slider.set(self.power)
+        self.power_slider.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(control_frame, text="Rotate Left", 
+                 command=lambda: self.update_rotation(0.1)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Rotate Right", 
+                 command=lambda: self.update_rotation(-0.1)).pack(side=tk.LEFT, padx=5)
+
+    def set_power(self, power):
+        self.power = power
+        self.safe_reset()
+        
+    def update_rotation(self, angle):
+        self.rotation += angle
+        self.safe_reset()
+        
+    def initialize_fractal(self):
+        self.img = Image.new('RGB', (self.size, self.size), 'black')
+        self.pixels = self.img.load()
+        
+    def toggle_animation(self):
+        if not self.rendering:
+            self.start_animation()
+        else:
+            self.rendering = False
+            self.start_stop.config(text="Start")
+
+    def start_animation(self):
+        if not self.active or self.rendering:
+            return
+            
+        self.rendering = True
+        self.start_stop.config(text="Stop")
+        self.render_fractal()
+        
+    def render_fractal(self):
+        if not self.active:
+            return
+
+        try:
+            rot_mat = np.array([
+                [math.cos(self.rotation), 0, -math.sin(self.rotation)],
+                [0, 1, 0],
+                [math.sin(self.rotation), 0, math.cos(self.rotation)]
+            ])
+
+            for y in range(self.size):
+                if not self.active or not self.rendering:
+                    break
+                    
+                for x in range(self.size):
+                    uv = np.array([(x/self.size - 0.5) * 2, 
+                                  (y/self.size - 0.5) * 2])
+                    rd = rot_mat @ np.array([uv[0], uv[1], 1])
+                    rd /= np.linalg.norm(rd)
+                    self.pixels[x, y] = self.cast_ray(self.cam_pos, rd)
+                
+                if y % 10 == 0:
+                    self.safe_update_image()
+
+            self.safe_update_image()
+            
+        except Exception as e:
+            print(f"Rendering error: {e}")
+        finally:
+            self.rendering = False
+            if self.active:
+                self.start_stop.config(text="Start")
+
+    def safe_update_image(self):
+        if not self.active:
+            return
+            
+        try:
+            self.tk_img = ImageTk.PhotoImage(image=self.img)
+            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
+        except tk.TclError:
+            self.active = False
+
+    def safe_reset(self):
+        if not self.active:
+            return
+            
+        self.rendering = False
+        self.start_stop.config(text="Start")
+        self.canvas.delete("all")
+        self.initialize_fractal()
+        if self.animating:
+            self.start_animation()
+
+    def cast_ray(self, ro, rd):
+        d_total = 0
+        for _ in range(50):
+            p = ro + rd * d_total
+            d = self.mandelbulb_distance(p)
+            d_total += d
+            if d < 0.001:
+                normal = self.get_normal(p)
+                light_dir = (self.light_pos - p)
+                light_dir /= np.linalg.norm(light_dir)
+                diff = max(0.1, np.dot(normal, light_dir))
+                col = int(diff * 255)
+                return (col, col, col)
+            if d_total > 8:
+                break
+        return (0, 0, 0)
+        
+    def mandelbulb_distance(self, p):
+        z = p.copy()
+        dr = 1.0
+        r = 0.0
+        power = self.power
+        
+        for _ in range(self.iterations):
+            r = np.linalg.norm(z)
+            if r > 2:
+                break
+                
+            theta = math.acos(z[2]/r)
+            phi = math.atan2(z[1], z[0])
+            dr = r**(power-1) * power * dr + 1.0
+            
+            zr = r**power
+            theta *= power
+            phi *= power
+            
+            z = zr * np.array([
+                math.sin(theta) * math.cos(phi),
+                math.sin(theta) * math.sin(phi),
+                math.cos(theta)
+            ]) + p
+            
+        return 0.5 * math.log(r) * r / dr if r > 2 else 9999.0
+        
+    def get_normal(self, p):
+        eps = 0.001
+        return np.array([
+            self.mandelbulb_distance(p + [eps,0,0]) - self.mandelbulb_distance(p - [eps,0,0]),
+            self.mandelbulb_distance(p + [0,eps,0]) - self.mandelbulb_distance(p - [0,eps,0]),
+            self.mandelbulb_distance(p + [0,0,eps]) - self.mandelbulb_distance(p - [0,0,eps])
+        ]) / (2*eps)
+
+    def reset(self):
+        self.safe_reset()
+
+    def destroy(self):
+        self.active = False
+        self.rendering = False
+        super().destroy()
 
 class MandelbrotFrame(BaseFractal):
     def __init__(self, master, app):
