@@ -125,15 +125,23 @@ class BaseFractal(tk.Frame):
         self.animating = False
         self.animation_delay = 50
         self.zoom_stack = []
+        self.zoom_enabled = True
         self.setup_ui()
         self.setup_zoom()
 
     def setup_zoom(self):
-        self.canvas.bind("<ButtonPress-1>", self.start_zoom)
-        self.canvas.bind("<B1-Motion>", self.update_zoom_box)
-        self.canvas.bind("<ButtonRelease-1>", self.finish_zoom)
-        self.master.bind("<Control-z>", self.zoom_out)
-        self.master.bind("<Control-Z>", self.zoom_out)
+        if self.zoom_enabled:
+            self.canvas.bind("<ButtonPress-1>", self.start_zoom)
+            self.canvas.bind("<B1-Motion>", self.update_zoom_box)
+            self.canvas.bind("<ButtonRelease-1>", self.finish_zoom)
+            self.master.bind("<Control-z>", self.zoom_out)
+            self.master.bind("<Control-Z>", self.zoom_out)
+        else:
+            self.canvas.unbind("<ButtonPress-1>")
+            self.canvas.unbind("<B1-Motion>")
+            self.canvas.unbind("<ButtonRelease-1>")
+            self.master.unbind("<Control-z>")
+            self.master.unbind("<Control-Z>")
 
     def setup_ui(self):
         tk.Button(self, text="← Back", command=self.app.show_main_menu).pack(anchor="nw")
@@ -235,6 +243,7 @@ class BaseFractal(tk.Frame):
 class ChaosGameSierpinskiFrame(BaseFractal):
     def __init__(self, master, app):
         super().__init__(master, app)
+        self.zoom_enabled = False
         self.xmin, self.xmax = 0.0, 1.0  
         self.ymin, self.ymax = 0.0, 1.0
 
@@ -310,24 +319,26 @@ class MandelbrotFrame(BaseFractal):
         if not self.animating or self.current_iter >= self.iterations:
             return
 
-        mask = (self.div_time == self.iterations)
-        self.z[mask] = self.z[mask] ** 2 + self.c[mask]
-        escaped = (np.abs(self.z) > 4) & mask
-        self.div_time[escaped] = self.current_iter
+        steps = 5
+        for _ in range(steps):
+            if self.current_iter >= self.iterations:
+                break
+            mask = (self.div_time == self.iterations)
+            self.z[mask] = self.z[mask] ** 2 + self.c[mask]
+            escaped = (np.abs(self.z) > 4) & mask
+            self.div_time[escaped] = self.current_iter
+            self.current_iter += 1
 
-        if self.current_iter % 5 == 0 or self.current_iter == self.iterations - 1:
-            img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
-            self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
-            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
-        
-        self.current_iter += 1
+        img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
+        self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
         self.anim_id = self.after(self.animation_delay, self.animate)
 
 class BurningShipFrame(BaseFractal):
     def __init__(self, master, app):
         super().__init__(master, app)
         self.xmin, self.xmax = -2.0, 1.0
-        self.ymin, self.ymax = -1.5, 1.5
+        self.ymin, self.ymax = -1.8, 0.2
 
     def initialize_fractal(self):
         self.z = np.zeros((self.size, self.size), dtype=np.complex128)
@@ -345,24 +356,26 @@ class BurningShipFrame(BaseFractal):
         if not self.animating or self.current_iter >= self.iterations:
             return
 
-        mask = (self.div_time == self.iterations)
-        self.z[mask] = (np.abs(self.z[mask].real) + 1j * np.abs(self.z[mask].imag)) ** 2 + self.c[mask]
-        escaped = (np.abs(self.z) > 4) & mask
-        self.div_time[escaped] = self.current_iter
+        steps = 5
+        for _ in range(steps):
+            if self.current_iter >= self.iterations:
+                break
+            mask = (self.div_time == self.iterations)
+            self.z[mask] = (np.abs(self.z[mask].real) + 1j * np.abs(self.z[mask].imag)) ** 2 + self.c[mask]
+            escaped = (np.abs(self.z) > 4) & mask
+            self.div_time[escaped] = self.current_iter
+            self.current_iter += 1
 
-        if self.current_iter % 5 == 0 or self.current_iter == self.iterations - 1:
-            img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
-            self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
-            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
-        
-        self.current_iter += 1
+        img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
+        self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
         self.anim_id = self.after(self.animation_delay, self.animate)
 
 class JuliaFrame(BaseFractal):
     def __init__(self, master, app, constant):
         self.constant = constant
         super().__init__(master, app)
-        self.xmin, self.xmax = -2.0, 2.0 
+        self.xmin, self.xmax = -2.0, 2.0
         self.ymin, self.ymax = -2.0, 2.0
 
     def initialize_fractal(self):
@@ -381,17 +394,19 @@ class JuliaFrame(BaseFractal):
         if not self.animating or self.current_iter >= self.iterations:
             return
 
-        mask = (self.div_time == self.iterations)
-        self.z[mask] = self.z[mask] ** 2 + self.constant 
-        escaped = (np.abs(self.z) > 4) & mask
-        self.div_time[escaped] = self.current_iter
+        steps = 5
+        for _ in range(steps):
+            if self.current_iter >= self.iterations:
+                break
+            mask = (self.div_time == self.iterations)
+            self.z[mask] = self.z[mask] ** 2 + self.constant
+            escaped = (np.abs(self.z) > 4) & mask
+            self.div_time[escaped] = self.current_iter
+            self.current_iter += 1
 
-        if self.current_iter % 5 == 0 or self.current_iter == self.iterations - 1:
-            img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
-            self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
-            self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
-        
-        self.current_iter += 1
+        img = Image.fromarray(np.uint8(self.div_time.T * 255 / self.iterations))
+        self.tk_img = ImageTk.PhotoImage(image=img.convert('RGB'))
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
         self.anim_id = self.after(self.animation_delay, self.animate)
 
 class NewtonFrame(BaseFractal):
@@ -415,9 +430,14 @@ class NewtonFrame(BaseFractal):
         if not self.animating or self.current_iter >= self.iterations:
             return
 
-        mask = np.abs(self.Z) > 1e-6
-        self.Z[mask] -= (self.Z[mask] ** 3 - 1) / (3 * self.Z[mask] ** 2)
-        
+        steps = 3
+        for _ in range(steps):
+            if self.current_iter >= self.iterations:
+                break
+            mask = np.abs(self.Z) > 1e-6
+            self.Z[mask] -= (self.Z[mask] ** 3 - 1) / (3 * self.Z[mask] ** 2)
+            self.current_iter += 1
+
         roots = [1, -0.5+0.866j, -0.5-0.866j]
         colors = np.array([[255,0,0], [0,255,0], [0,0,255], [100,100,100]])
         distances = np.abs(self.Z[:,:,None] - np.array(roots)[None,None,:])
@@ -426,11 +446,12 @@ class NewtonFrame(BaseFractal):
 
         self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(img_array.astype(np.uint8)))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
-        
-        self.current_iter += 1
         self.anim_id = self.after(self.animation_delay, self.animate)
 
 class SierpinskiFrame(BaseFractal):
+    def __init__(self, master, app):
+        super().__init__(master, app)
+        self.zoom_enabled = False
     def initialize_fractal(self):
         self.img = Image.new('RGB', (self.size, self.size), 'black')
         self.draw = ImageDraw.Draw(self.img)
@@ -482,6 +503,7 @@ class IFSFractalFrame(BaseFractal):
     def __init__(self, master, app, fractal_type):
         self.fractal_type = fractal_type
         super().__init__(master, app)
+        self.zoom_enabled = False
         
     def initialize_fractal(self):
         self.configure_transforms()
