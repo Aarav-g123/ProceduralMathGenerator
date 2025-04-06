@@ -6,8 +6,14 @@ import math
 import random
 from collections import deque
 from functools import partial
+import re
+try:
+    from sympy import symbols, diff, simplify, SympifyError
+    from sympy.parsing.sympy_parser import parse_expr
+    SYMPY_AVAILABLE = True
+except ImportError:
+    SYMPY_AVAILABLE = False
 
-#Mandelbulb :)
 
 
 class FractalApp:
@@ -99,6 +105,30 @@ class NewtonCategory(BaseCategory):
     def create_fractal_buttons(self):
         tk.Button(self, text="Newton Fractal (z³-1)", width=20, height=2,
                 command=lambda: self.app.show_fractal(NewtonFrame)).pack(pady=2)
+        tk.Button(self, text="Custom Polynomial...", width=20, height=2,
+                command=self.show_custom_dialog).pack(pady=2)
+
+    def show_custom_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Custom Polynomial")
+        
+        tk.Label(dialog, text="Enter polynomial f(z):").pack()
+        self.f_entry = tk.Entry(dialog, width=30)
+        self.f_entry.insert(0, "z**3 - 1")
+        self.f_entry.pack()
+        
+        tk.Label(dialog, text="Enter derivative f'(z):").pack()
+        self.df_entry = tk.Entry(dialog, width=30)
+        self.df_entry.insert(0, "3*z**2")
+        self.df_entry.pack()
+        
+        tk.Button(dialog, text="Generate", command=self.generate_fractal).pack(pady=5)
+
+    def generate_fractal(self):
+        f_str = self.f_entry.get()
+        df_str = self.df_entry.get()
+        self.app.show_fractal(NewtonFrame, f_str, df_str)
+        self.f_entry.master.destroy()
 
 class SierpinskiCategory(BaseCategory):
     def create_fractal_buttons(self):
@@ -309,15 +339,10 @@ class ChaosGameSierpinskiFrame(BaseFractal):
         self.anim_id = self.after(self.animation_delay, self.animate)
 class MandelbulbFrame(BaseFractal):
     def __init__(self, master, app):
-        # Initialize critical attributes first
         self.power = 8
         self.size = 300
         self.iterations = 30
-        
-        # Call parent constructor
         super().__init__(master, app)
-        
-        # Initialize remaining attributes
         self.zoom_enabled = False
         self.cam_pos = np.array([0, 0, -2.5])
         self.light_pos = np.array([2, 1, -1])
@@ -325,11 +350,11 @@ class MandelbulbFrame(BaseFractal):
         self.rendering = False
         self.active = True
         
-        # Clear existing UI from parent and rebuild
+
         self.rebuild_ui()
 
     def rebuild_ui(self):
-        """Destroy parent UI elements and create new ones"""
+
         for widget in self.winfo_children():
             widget.destroy()
         
@@ -337,14 +362,12 @@ class MandelbulbFrame(BaseFractal):
         self.create_3d_controls()
 
     def setup_ui(self):
-        """Custom UI setup for Mandelbulb"""
         tk.Button(self, text="← Back", command=self.app.show_main_menu).pack(anchor="nw")
         self.canvas = tk.Canvas(self, width=self.size, height=self.size, bg='black')
         self.canvas.pack()
         self.initialize_fractal()
 
     def create_3d_controls(self):
-        """Create Mandelbulb-specific controls"""
         control_frame = ttk.Frame(self)
         control_frame.pack(fill=tk.X)
         
@@ -619,8 +642,14 @@ class JuliaFrame(BaseFractal):
         self.anim_id = self.after(self.animation_delay, self.animate)
 
 class NewtonFrame(BaseFractal):
-    def __init__(self, master, app):
+    def __init__(self, master, app, f_str="z**3 - 1", df_str="3*z**2"):
+        self.f_str = f_str
+        self.df_str = df_str
+        self.f = lambda z: eval(f_str, {"z": z, "math": math, "np": np}, {})
+        self.df = lambda z: eval(df_str, {"z": z, "math": math, "np": np}, {})
+
         super().__init__(master, app)
+        
         self.xmin, self.xmax = -2.0, 2.0
         self.ymin, self.ymax = -2.0, 2.0
 
@@ -643,19 +672,72 @@ class NewtonFrame(BaseFractal):
         for _ in range(steps):
             if self.current_iter >= self.iterations:
                 break
-            mask = np.abs(self.Z) > 1e-6
-            self.Z[mask] -= (self.Z[mask] ** 3 - 1) / (3 * self.Z[mask] ** 2)
+            
+
+            with np.errstate(all='ignore'):
+                mask = np.abs(self.df(self.Z)) > 1e-10
+                self.Z[mask] -= self.f(self.Z[mask]) / self.df(self.Z[mask])
+                self.Z[~mask] = np.nan 
+
             self.current_iter += 1
 
-        roots = [1, -0.5+0.866j, -0.5-0.866j]
-        colors = np.array([[255,0,0], [0,255,0], [0,0,255], [100,100,100]])
-        distances = np.abs(self.Z[:,:,None] - np.array(roots)[None,None,:])
-        closest = np.argmin(distances, axis=2)
-        img_array = colors[closest]
-
-        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(img_array.astype(np.uint8)))
+        img_array = self.complex_to_rgb(self.Z)
+        self.tk_img = ImageTk.PhotoImage(image=Image.fromarray(img_array))
         self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW)
         self.anim_id = self.after(self.animation_delay, self.animate)
+
+    def complex_to_rgb(self, Z):
+
+        hsv = np.zeros((Z.shape[0], Z.shape[1], 3), dtype=np.uint8)
+
+        valid = ~np.isnan(Z) & ~np.isinf(Z)
+
+        phase = np.zeros_like(Z, dtype=np.float32)
+        mag = np.zeros_like(Z, dtype=np.float32)
+        
+        phase[valid] = np.angle(Z[valid])
+        mag[valid] = np.abs(Z[valid])
+        
+
+        h = (phase + np.pi) / (2 * np.pi)
+        v = 1 / (1 + mag**0.3)
+        v = np.clip(v, 0, 1)
+        
+        h_flat = h.reshape(-1)
+        v_flat = v.reshape(-1)
+        valid_flat = valid.reshape(-1)
+
+        c = (v_flat * 255).astype(np.uint8)
+        h = (h_flat * 6)
+        i = np.floor(h).astype(np.uint8)
+        f = (h - i).astype(np.float32)
+        
+        rgb = np.zeros((len(h), 3), dtype=np.uint8)
+        
+        conditions = [
+            (i % 6 == 0),
+            (i % 6 == 1),
+            (i % 6 == 2),
+            (i % 6 == 3),
+            (i % 6 == 4),
+            (i % 6 == 5)
+        ]
+        
+        choices = [
+            np.stack([c, (f * c).astype(np.uint8), np.zeros_like(c)], axis=1),
+            np.stack([((1-f) * c).astype(np.uint8), c, np.zeros_like(c)], axis=1),
+            np.stack([np.zeros_like(c), c, (f * c).astype(np.uint8)], axis=1),
+            np.stack([np.zeros_like(c), ((1-f) * c).astype(np.uint8), c], axis=1),
+            np.stack([(f * c).astype(np.uint8), np.zeros_like(c), c], axis=1),
+            np.stack([c, np.zeros_like(c), ((1-f) * c).astype(np.uint8)], axis=1)
+        ]
+        
+        for cond, choice in zip(conditions, choices):
+            mask = cond & valid_flat
+            rgb[mask] = choice[mask]
+        
+        rgb_image = rgb.reshape(Z.shape[0], Z.shape[1], 3)
+        return rgb_image
 
 class SierpinskiFrame(BaseFractal):
     def __init__(self, master, app):
